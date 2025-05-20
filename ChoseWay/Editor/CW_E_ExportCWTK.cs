@@ -816,20 +816,23 @@ public class CW_E_ExportCWTK : EditorWindow
                 string[] parts = githubRepoUrl.TrimEnd('/').Split('/');
                 if (parts.Length > 0)
                 {
-                    packageName = parts[parts.Length - 1].Replace(".git", "");
+                    packageName = parts[parts.Length - 1].Replace(".git", "").ToLower();
                 }
             }
             
             // 如果无法从URL提取，使用默认包名
             if (string.IsNullOrEmpty(packageName))
             {
-                packageName = "com.choseway.CWTK";
+                packageName = "com.choseway.cwtk";
             }
             else if (!packageName.StartsWith("com."))
             {
                 // 确保包名符合UPM命名规范 (com.组织名.包名)
-                packageName = "com.choseway.CWTK";
+                packageName = "com.choseway." + packageName.ToLower();
             }
+            
+            // UPM要求包名必须全部小写
+            packageName = packageName.ToLower();
             
             // 确保版本号格式正确 (只包含数字和点，不包含括号和日期)
             string cleanVersion = currentVersion;
@@ -861,8 +864,7 @@ public class CW_E_ExportCWTK : EditorWindow
             sb.AppendLine($"  \"documentationUrl\": \"\",");
             sb.AppendLine($"  \"changelogUrl\": \"\",");
             sb.AppendLine($"  \"licensesUrl\": \"\",");
-            sb.AppendLine($"  \"dependencies\": {{");
-            sb.AppendLine($"  }},");
+            sb.AppendLine($"  \"dependencies\": {{}},");
             sb.AppendLine($"  \"keywords\": [");
             sb.AppendLine($"    \"cwtk\",");
             sb.AppendLine($"    \"unity\",");
@@ -884,7 +886,7 @@ public class CW_E_ExportCWTK : EditorWindow
             // 验证文件是否已创建
             if (File.Exists(packageJsonPath))
             {
-                UnityEngine.Debug.Log($"{(isNewFile ? "创建" : "更新")}package.json成功: {packageJsonPath}，版本号: {cleanVersion}");
+                UnityEngine.Debug.Log($"{(isNewFile ? "创建" : "更新")}package.json成功: {packageJsonPath}，包名: {packageName}，版本号: {cleanVersion}");
             }
             else
             {
