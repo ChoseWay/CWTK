@@ -811,12 +811,12 @@ public class CW_E_ExportCWTK : EditorWindow
             // 如果无法从URL提取，使用默认包名
             if (string.IsNullOrEmpty(packageName))
             {
-                packageName = "com.choseway.cwtk";
+                packageName = "com.choseway.CWTK";
             }
             else if (!packageName.StartsWith("com."))
             {
                 // 确保包名符合UPM命名规范 (com.组织名.包名)
-                packageName = "com.choseway." + packageName.ToLower();
+                packageName = "com.choseway.CWTK";
             }
             
             string displayName = "CWTK Unity工具包";
@@ -964,7 +964,7 @@ public class CW_E_ExportCWTK : EditorWindow
                 readmeSb.AppendLine("# CWTK Unity工具包");
                 readmeSb.AppendLine();
                 readmeSb.AppendLine("## 简介");
-                readmeSb.AppendLine("CWTK是一个专为Unity开发的工具包，提供多种实用功能。");
+                readmeSb.AppendLine("");
                 readmeSb.AppendLine();
                 readmeSb.AppendLine("## 安装方法");
                 readmeSb.AppendLine("### 通过Unity Package Manager安装");

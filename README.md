@@ -1,7 +1,7 @@
 # CWTK Unity工具包
 
 ## 简介
-CWTK是一个专为Unity开发的工具包，提供多种实用功能。
+
 
 ## 安装方法
 ### 通过Unity Package Manager安装
