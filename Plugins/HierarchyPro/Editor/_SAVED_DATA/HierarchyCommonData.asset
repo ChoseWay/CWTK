@@ -15,6 +15,11 @@ MonoBehaviour:
   ScenesTabs:
   - pin: 0
     path:
+    - 
+    guid:
+    - 
+  - pin: 0
+    path:
     - Assets/_SCENE/TestScene.unity
     guid:
     - 01cb3a414ff93e64285b2968b623aceb

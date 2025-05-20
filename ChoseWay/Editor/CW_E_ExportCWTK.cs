@@ -331,7 +331,7 @@ public class CW_E_ExportCWTK : EditorWindow
         GUI.backgroundColor = Color.cyan;
         if (GUILayout.Button("上传到GitHub", GUILayout.Height(30)))
         {
-            UploadToGitHubAsync();
+            UploadToGitHub();
         }
         GUI.backgroundColor = Color.white;
         
@@ -688,24 +688,52 @@ public class CW_E_ExportCWTK : EditorWindow
             ConfigureGitLineEndings();
             await Task.Delay(300);
             
-            // 更新package.json文件
-            UpdateProgress("准备上传", 0.05f, "正在更新package.json...");
-            UpdatePackageJson();
-            await Task.Delay(300);
+            // 确保清理仓库内容前先创建package.json文件的备份
+            string tempPackageJson = "";
+            string packageJsonPath = Path.Combine(localRepoPath, "package.json");
+            if (File.Exists(packageJsonPath))
+            {
+                tempPackageJson = File.ReadAllText(packageJsonPath);
+                UnityEngine.Debug.Log("已备份现有package.json文件");
+            }
             
             // 清空仓库目录下的内容(除了.git目录)
             UpdateProgress("准备上传", 0.10f, "正在清理仓库目录...");
             ClearRepositoryContent();
             await Task.Delay(300);
             
+            // 更新package.json文件
+            UpdateProgress("准备上传", 0.05f, "正在创建package.json...");
+            CreatePackageJson();
+            await Task.Delay(300);
+            
             // 复制选中的文件夹到仓库
             UpdateProgress("准备上传", 0.15f, "正在复制文件...");
             await CopySelectedFoldersToRepoAsync(selectedPaths);
+            
+            // 再次确认package.json存在
+            if (!File.Exists(packageJsonPath))
+            {
+                UnityEngine.Debug.LogWarning("package.json未被创建，尝试重新创建");
+                CreatePackageJson();
+                await Task.Delay(100);
+                
+                if (!File.Exists(packageJsonPath))
+                {
+                    UnityEngine.Debug.LogError("无法创建package.json文件");
+                    EditorUtility.DisplayDialog("错误", "无法创建package.json文件，请检查权限或路径是否正确", "确定");
+                    ResetProgress();
+                    return;
+                }
+            }
             
             // Git添加
             UpdateProgress("Git操作", 0.70f, "正在添加文件到Git...");
             if (await ExecuteGitCommandAsync("add -A", "正在添加文件..."))
             {
+                // 确认添加了package.json
+                await ExecuteGitCommandAsync("status", "检查文件状态...");
+                
                 // Git提交
                 UpdateProgress("Git操作", 0.80f, "正在提交更改...");
                 bool commitSuccess = await ExecuteGitCommandAsync($"commit -m \"{commitMessage}\" --no-verify", "正在提交更改...");
@@ -721,6 +749,8 @@ public class CW_E_ExportCWTK : EditorWindow
                     
                     if (pushSuccess)
                     {
+                        // 打开文件夹查看结果
+                        EditorUtility.RevealInFinder(localRepoPath);
                         EditorUtility.DisplayDialog("成功", "文件已成功上传到GitHub仓库", "确定");
                     }
                 }
@@ -738,6 +768,8 @@ public class CW_E_ExportCWTK : EditorWindow
                         
                         if (pushSuccess)
                         {
+                            // 打开文件夹查看结果
+                            EditorUtility.RevealInFinder(localRepoPath);
                             EditorUtility.DisplayDialog("成功", "文件已成功上传到GitHub仓库", "确定");
                         }
                     }
@@ -753,34 +785,8 @@ public class CW_E_ExportCWTK : EditorWindow
         }
     }
     
-    private void UploadToGitHub()
-    {
-        // 启动异步上传过程
-        UploadToGitHubAsync();
-    }
-    
-    private List<string> GetSelectedPaths()
-    {
-        List<string> selectedPaths = new List<string>();
-        
-        for (int i = 0; i < foldersToExport.Count; i++)
-        {
-            if (foldersToExportToggles[i])
-            {
-                selectedPaths.Add(foldersToExport[i]);
-            }
-        }
-        
-        // 添加更新记录文件
-        if (File.Exists(changelogPath) && !selectedPaths.Contains(Path.GetDirectoryName(changelogPath)))
-        {
-            selectedPaths.Add(changelogPath);
-        }
-        
-        return selectedPaths;
-    }
-    
-    private void UpdatePackageJson()
+    // 创建package.json文件
+    private void CreatePackageJson()
     {
         // package.json应放在仓库根目录
         string packageJsonPath = Path.Combine(localRepoPath, "package.json");
@@ -834,9 +840,21 @@ public class CW_E_ExportCWTK : EditorWindow
             sb.AppendLine($"  ]");
             sb.AppendLine("}");
             
+            // 确保目录存在
+            Directory.CreateDirectory(Path.GetDirectoryName(packageJsonPath));
+            
+            // 写入文件
             File.WriteAllText(packageJsonPath, sb.ToString());
             
-            UnityEngine.Debug.Log($"{(isNewFile ? "创建" : "更新")}package.json成功");
+            // 验证文件是否已创建
+            if (File.Exists(packageJsonPath))
+            {
+                UnityEngine.Debug.Log($"{(isNewFile ? "创建" : "更新")}package.json成功: {packageJsonPath}");
+            }
+            else
+            {
+                UnityEngine.Debug.LogError($"package.json文件未能创建: {packageJsonPath}");
+            }
         }
         catch (Exception ex)
         {
@@ -923,12 +941,20 @@ public class CW_E_ExportCWTK : EditorWindow
         UnityEngine.Debug.Log("所有选定文件已复制到仓库");
     }
     
-    // 创建UPM包所需的特殊文件
     private async Task CreateUPMSpecialFilesAsync()
     {
         try
         {
             UpdateProgress("准备上传", 0.65f, "正在创建UPM所需文件...");
+            
+            // 首先确保package.json存在
+            string packageJsonPath = Path.Combine(localRepoPath, "package.json");
+            if (!File.Exists(packageJsonPath))
+            {
+                UnityEngine.Debug.Log("在CreateUPMSpecialFilesAsync中创建package.json");
+                CreatePackageJson();
+                await Task.Delay(100);
+            }
             
             // 创建README.md文件（如果不存在）
             string readmePath = Path.Combine(localRepoPath, "README.md");
@@ -952,6 +978,7 @@ public class CW_E_ExportCWTK : EditorWindow
                 readmeSb.AppendLine($"v{currentVersion}");
                 
                 File.WriteAllText(readmePath, readmeSb.ToString());
+                UnityEngine.Debug.Log("创建README.md成功");
             }
             
             // 创建CHANGELOG.md文件（如果不存在或有更新）
@@ -1246,5 +1273,32 @@ public class CW_E_ExportCWTK : EditorWindow
         uploadProgress = 0f;
         progressDetails = "";
         Repaint();
+    }
+
+    private List<string> GetSelectedPaths()
+    {
+        List<string> selectedPaths = new List<string>();
+        
+        for (int i = 0; i < foldersToExport.Count; i++)
+        {
+            if (foldersToExportToggles[i])
+            {
+                selectedPaths.Add(foldersToExport[i]);
+            }
+        }
+        
+        // 添加更新记录文件
+        if (File.Exists(changelogPath) && !selectedPaths.Contains(Path.GetDirectoryName(changelogPath)))
+        {
+            selectedPaths.Add(changelogPath);
+        }
+        
+        return selectedPaths;
+    }
+    
+    private void UploadToGitHub()
+    {
+        // 启动异步上传过程
+        UploadToGitHubAsync();
     }
 } 
