@@ -782,16 +782,35 @@ public class CW_E_ExportCWTK : EditorWindow
     
     private void UpdatePackageJson()
     {
+        // package.json应放在仓库根目录
         string packageJsonPath = Path.Combine(localRepoPath, "package.json");
         bool isNewFile = !File.Exists(packageJsonPath);
         
         // 创建或更新package.json
         try
         {
-            string packageName = Path.GetFileName(githubRepoUrl).Replace(".git", "");
+            string packageName = "";
+            
+            // 从仓库URL中提取包名
+            if (!string.IsNullOrEmpty(githubRepoUrl))
+            {
+                // 提取仓库名称
+                string[] parts = githubRepoUrl.TrimEnd('/').Split('/');
+                if (parts.Length > 0)
+                {
+                    packageName = parts[parts.Length - 1].Replace(".git", "");
+                }
+            }
+            
+            // 如果无法从URL提取，使用默认包名
             if (string.IsNullOrEmpty(packageName))
             {
                 packageName = "com.choseway.cwtk";
+            }
+            else if (!packageName.StartsWith("com."))
+            {
+                // 确保包名符合UPM命名规范 (com.组织名.包名)
+                packageName = "com.choseway." + packageName.ToLower();
             }
             
             string displayName = "CWTK Unity工具包";
@@ -869,6 +888,7 @@ public class CW_E_ExportCWTK : EditorWindow
                 string relativePath = sourcePath;
                 if (sourcePath.StartsWith("Assets/"))
                 {
+                    // 对于UPM包，我们将Assets/下的内容直接复制到根目录
                     relativePath = sourcePath.Substring(7); // 移除"Assets/"前缀
                 }
                 
@@ -897,7 +917,115 @@ public class CW_E_ExportCWTK : EditorWindow
             }
         }
         
+        // 创建UPM所需的特殊文件
+        await CreateUPMSpecialFilesAsync();
+        
         UnityEngine.Debug.Log("所有选定文件已复制到仓库");
+    }
+    
+    // 创建UPM包所需的特殊文件
+    private async Task CreateUPMSpecialFilesAsync()
+    {
+        try
+        {
+            UpdateProgress("准备上传", 0.65f, "正在创建UPM所需文件...");
+            
+            // 创建README.md文件（如果不存在）
+            string readmePath = Path.Combine(localRepoPath, "README.md");
+            if (!File.Exists(readmePath))
+            {
+                StringBuilder readmeSb = new StringBuilder();
+                readmeSb.AppendLine("# CWTK Unity工具包");
+                readmeSb.AppendLine();
+                readmeSb.AppendLine("## 简介");
+                readmeSb.AppendLine("CWTK是一个专为Unity开发的工具包，提供多种实用功能。");
+                readmeSb.AppendLine();
+                readmeSb.AppendLine("## 安装方法");
+                readmeSb.AppendLine("### 通过Unity Package Manager安装");
+                readmeSb.AppendLine("1. 打开Unity项目");
+                readmeSb.AppendLine("2. 打开Package Manager (Window > Package Manager)");
+                readmeSb.AppendLine("3. 点击左上角的 \"+\" 按钮，选择 \"Add package from git URL...\"");
+                readmeSb.AppendLine($"4. 输入: `{githubRepoUrl}`");
+                readmeSb.AppendLine("5. 点击 \"Add\" 按钮");
+                readmeSb.AppendLine();
+                readmeSb.AppendLine("## 当前版本");
+                readmeSb.AppendLine($"v{currentVersion}");
+                
+                File.WriteAllText(readmePath, readmeSb.ToString());
+            }
+            
+            // 创建CHANGELOG.md文件（如果不存在或有更新）
+            string changelogMdPath = Path.Combine(localRepoPath, "CHANGELOG.md");
+            if (File.Exists(changelogPath) && (!File.Exists(changelogMdPath) || 
+                File.GetLastWriteTime(changelogPath) > File.GetLastWriteTime(changelogMdPath)))
+            {
+                // 将TXT格式的更新日志转换为Markdown格式
+                string txtContent = File.ReadAllText(changelogPath);
+                StringBuilder mdContent = new StringBuilder();
+                mdContent.AppendLine("# 更新日志");
+                mdContent.AppendLine();
+                
+                string[] lines = txtContent.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                bool isVersionHeader = true;
+                
+                foreach (string line in lines)
+                {
+                    if (line.StartsWith("v") && line.Contains("("))
+                    {
+                        if (!isVersionHeader)
+                        {
+                            mdContent.AppendLine();
+                        }
+                        mdContent.AppendLine($"## {line}");
+                        isVersionHeader = false;
+                    }
+                    else
+                    {
+                        mdContent.AppendLine($"- {line}");
+                    }
+                }
+                
+                File.WriteAllText(changelogMdPath, mdContent.ToString());
+            }
+            
+            // 创建LICENSE文件（如果不存在）
+            string licensePath = Path.Combine(localRepoPath, "LICENSE");
+            if (!File.Exists(licensePath))
+            {
+                StringBuilder licenseSb = new StringBuilder();
+                licenseSb.AppendLine("MIT License");
+                licenseSb.AppendLine();
+                licenseSb.AppendLine($"Copyright (c) {DateTime.Now.Year} ChoseWay");
+                licenseSb.AppendLine();
+                licenseSb.AppendLine("Permission is hereby granted, free of charge, to any person obtaining a copy");
+                licenseSb.AppendLine("of this software and associated documentation files (the \"Software\"), to deal");
+                licenseSb.AppendLine("in the Software without restriction, including without limitation the rights");
+                licenseSb.AppendLine("to use, copy, modify, merge, publish, distribute, sublicense, and/or sell");
+                licenseSb.AppendLine("copies of the Software, and to permit persons to whom the Software is");
+                licenseSb.AppendLine("furnished to do so, subject to the following conditions:");
+                licenseSb.AppendLine();
+                licenseSb.AppendLine("The above copyright notice and this permission notice shall be included in all");
+                licenseSb.AppendLine("copies or substantial portions of the Software.");
+                licenseSb.AppendLine();
+                licenseSb.AppendLine("THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR");
+                licenseSb.AppendLine("IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,");
+                licenseSb.AppendLine("FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE");
+                licenseSb.AppendLine("AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER");
+                licenseSb.AppendLine("LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,");
+                licenseSb.AppendLine("OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE");
+                licenseSb.AppendLine("SOFTWARE.");
+                
+                File.WriteAllText(licensePath, licenseSb.ToString());
+            }
+            
+            // 等待一小段时间，让UI更新
+            await Task.Delay(200);
+            
+        }
+        catch (Exception ex)
+        {
+            UnityEngine.Debug.LogError($"创建UPM特殊文件失败: {ex.Message}");
+        }
     }
     
     private async Task CopyDirectoryAsync(string sourceDir, string targetDir)
