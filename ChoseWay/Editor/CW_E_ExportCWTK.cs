@@ -112,7 +112,18 @@ public class CW_E_ExportCWTK : EditorWindow
                 string firstLine = lines[0];
                 if (firstLine.StartsWith("v"))
                 {
-                    currentVersion = firstLine.Substring(1).Trim();
+                    // 提取版本号，去除可能的日期和括号
+                    string versionWithDate = firstLine.Substring(1).Trim();
+                    int bracketIndex = versionWithDate.IndexOf('(');
+                    if (bracketIndex > 0)
+                    {
+                        currentVersion = versionWithDate.Substring(0, bracketIndex).Trim();
+                    }
+                    else
+                    {
+                        currentVersion = versionWithDate;
+                    }
+                    
                     newVersion = currentVersion;
                 }
             }
@@ -370,6 +381,7 @@ public class CW_E_ExportCWTK : EditorWindow
             
             File.WriteAllText(changelogPath, sb.ToString());
             
+            // 只保存纯版本号，不包含日期和括号
             currentVersion = newVersion;
             updateContent = "";
             
@@ -819,25 +831,48 @@ public class CW_E_ExportCWTK : EditorWindow
                 packageName = "com.choseway.CWTK";
             }
             
+            // 确保版本号格式正确 (只包含数字和点，不包含括号和日期)
+            string cleanVersion = currentVersion;
+            int bracketIndex = cleanVersion.IndexOf('(');
+            if (bracketIndex > 0)
+            {
+                cleanVersion = cleanVersion.Substring(0, bracketIndex).Trim();
+            }
+            
+            // 验证版本号格式
+            if (!IsValidVersion(cleanVersion))
+            {
+                UnityEngine.Debug.LogWarning($"版本号 '{cleanVersion}' 格式不正确，使用默认版本号 '1.0.0'");
+                cleanVersion = "1.0.0";
+            }
+            
             string displayName = "CWTK Unity工具包";
             string description = "专为Unity开发的工具包，提供多种实用功能";
             string author = "ChoseWay";
             
+            // 创建符合UPM规范的package.json
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("{");
             sb.AppendLine($"  \"name\": \"{packageName}\",");
-            sb.AppendLine($"  \"version\": \"{currentVersion}\",");
+            sb.AppendLine($"  \"version\": \"{cleanVersion}\",");
             sb.AppendLine($"  \"displayName\": \"{displayName}\",");
             sb.AppendLine($"  \"description\": \"{description}\",");
             sb.AppendLine($"  \"unity\": \"2020.3\",");
-            sb.AppendLine($"  \"author\": {{");
-            sb.AppendLine($"    \"name\": \"{author}\"");
+            sb.AppendLine($"  \"documentationUrl\": \"\",");
+            sb.AppendLine($"  \"changelogUrl\": \"\",");
+            sb.AppendLine($"  \"licensesUrl\": \"\",");
+            sb.AppendLine($"  \"dependencies\": {{");
             sb.AppendLine($"  }},");
             sb.AppendLine($"  \"keywords\": [");
             sb.AppendLine($"    \"cwtk\",");
             sb.AppendLine($"    \"unity\",");
             sb.AppendLine($"    \"tools\"");
-            sb.AppendLine($"  ]");
+            sb.AppendLine($"  ],");
+            sb.AppendLine($"  \"author\": {{");
+            sb.AppendLine($"    \"name\": \"{author}\",");
+            sb.AppendLine($"    \"email\": \"\",");
+            sb.AppendLine($"    \"url\": \"\"");
+            sb.AppendLine($"  }}");
             sb.AppendLine("}");
             
             // 确保目录存在
@@ -849,7 +884,7 @@ public class CW_E_ExportCWTK : EditorWindow
             // 验证文件是否已创建
             if (File.Exists(packageJsonPath))
             {
-                UnityEngine.Debug.Log($"{(isNewFile ? "创建" : "更新")}package.json成功: {packageJsonPath}");
+                UnityEngine.Debug.Log($"{(isNewFile ? "创建" : "更新")}package.json成功: {packageJsonPath}，版本号: {cleanVersion}");
             }
             else
             {
