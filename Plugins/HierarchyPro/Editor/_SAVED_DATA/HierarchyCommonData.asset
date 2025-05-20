@@ -1,0 +1,60 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 16
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c830b45ff415c9c41885298ccdab52af, type: 3}
+  m_Name: HierarchyCommonData
+  m_EditorClassIdentifier: 
+  ScenesTabs:
+  - pin: 0
+    path:
+    - Assets/_SCENE/TestScene.unity
+    guid:
+    - 01cb3a414ff93e64285b2968b623aceb
+  - pin: 0
+    path:
+    - Assets/ChoseWay/Scenes/ArtCheckStudio/ArtCheckStudio.unity
+    guid:
+    - d676f243e5abdb3479a36e6fa135a333
+  - pin: 0
+    path:
+    - Assets/_Do Not Export/In-game Debug Console Test.unity
+    guid:
+    - 75d5562e52061824ebcc36713caf5b84
+  - pin: 0
+    path:
+    - Assets/Plugins/HierarchyPro/Demo Scenes/Scene - HyperGraph/ExampleScene - HyperGraph.unity
+    guid:
+    - b11981bea446928448b0f35656690f56
+  - pin: 0
+    path:
+    - Assets/Plugins/HierarchyPro/Demo Scenes/Scene - DrawInHier/ExampleScene - DrawInHier.unity
+    guid:
+    - 0f8c3ded17ba7094288d44c3663749b0
+  HasCustomIconKeys: []
+  HidedComponentsIconsValues: []
+  HidedComponentsIconsKeys: []
+  FoolderBookmarkList:
+  - scrollY: 0
+    slots:
+    - slot_expanded: 1
+      description: 
+      guids:
+      - guid: e8e60686e44cf744fad7de8b6176b243
+      ShowContentInh: 0
+      FilterString: cs
+    expanded: 1
+    InstanceID: 225603899
+    ShowContent: 0
+    name: Default
+    isDefault: 1
+    draw_BgColor: 0
+    color_BgColor: {r: 0, g: 0, b: 0, a: 0}
+  PlayModeSaverPersistScripts: []
