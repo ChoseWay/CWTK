@@ -1,6 +1,6 @@
 {
   "name": "com.choseway.cwtk",
-  "version": "1.1",
+  "version": "1.1.0",
   "displayName": "CWTK Unity工具包",
   "description": "专为Unity开发的工具包，提供多种实用功能",
   "unity": "2020.3",
