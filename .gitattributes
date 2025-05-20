@@ -1,0 +1,25 @@
+# 设置默认行为，所有文件保持原有的行结束符
+* text=auto
+
+# 明确声明应该规范化的文本文件
+*.cs text
+*.txt text
+*.md text
+*.json text
+*.xml text
+*.shader text
+
+# 二进制文件不应被修改
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.tif binary
+*.tiff binary
+*.ico binary
+*.unity binary
+*.asset binary
+*.prefab binary
+*.fbx binary
+*.wav binary
+*.mp3 binary

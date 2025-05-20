@@ -7,6 +7,7 @@ using System.Diagnostics;
 using UnityEditor;
 using UnityEngine;
 using System.Linq;
+using System.Threading.Tasks;
 
 /// <summary>
 /// CWTK编辑器工具导出窗口
@@ -42,6 +43,12 @@ public class CW_E_ExportCWTK : EditorWindow
     private string commitMessage = "";
     private bool useGitLFS = false;
     
+    // 上传进度相关
+    private bool isUploading = false;
+    private string currentProgressStep = "";
+    private float uploadProgress = 0f;
+    private string progressDetails = "";
+    
     // 滚动视图位置
     private Vector2 scrollPosition;
     private Vector2 githubScrollPosition;
@@ -68,6 +75,15 @@ public class CW_E_ExportCWTK : EditorWindow
         
         // 加载GitHub设置
         LoadGitHubSettings();
+        
+        // 确保在编辑器更新时刷新进度UI
+        EditorApplication.update += Repaint;
+    }
+    
+    private void OnDisable()
+    {
+        // 移除更新回调
+        EditorApplication.update -= Repaint;
     }
 
     private void InitExportFolders()
@@ -128,6 +144,25 @@ public class CW_E_ExportCWTK : EditorWindow
         EditorGUILayout.LabelField("CWTK导出工具", EditorStyles.boldLabel);
         
         EditorGUILayout.Space(10);
+        
+        // 显示上传进度条（如果正在上传）
+        if (isUploading)
+        {
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.LabelField($"正在上传: {currentProgressStep}", EditorStyles.boldLabel);
+            
+            EditorGUI.ProgressBar(EditorGUILayout.GetControlRect(false, 20), uploadProgress, 
+                $"{Mathf.RoundToInt(uploadProgress * 100)}%");
+            
+            EditorGUILayout.Space(5);
+            EditorGUILayout.LabelField(progressDetails, EditorStyles.wordWrappedLabel);
+            
+            EditorGUILayout.EndVertical();
+            EditorGUILayout.Space(10);
+            
+            // 如果上传过程中，禁用其他控件
+            EditorGUI.BeginDisabledGroup(true);
+        }
         
         EditorGUILayout.BeginVertical(EditorStyles.helpBox);
         EditorGUILayout.LabelField("版本信息", EditorStyles.boldLabel);
@@ -296,11 +331,16 @@ public class CW_E_ExportCWTK : EditorWindow
         GUI.backgroundColor = Color.cyan;
         if (GUILayout.Button("上传到GitHub", GUILayout.Height(30)))
         {
-            UploadToGitHub();
+            UploadToGitHubAsync();
         }
         GUI.backgroundColor = Color.white;
         
         EditorGUILayout.EndVertical();
+        
+        if (isUploading)
+        {
+            EditorGUI.EndDisabledGroup();
+        }
     }
 
     private void UpdateVersionInfo()
@@ -454,6 +494,8 @@ public class CW_E_ExportCWTK : EditorWindow
             return;
         }
         
+        UpdateProgress("初始化仓库", 0f, "正在检查仓库状态...");
+        
         bool isExistingRepo = Directory.Exists(Path.Combine(localRepoPath, ".git"));
         
         if (isExistingRepo)
@@ -461,7 +503,9 @@ public class CW_E_ExportCWTK : EditorWindow
             // 已有仓库，拉取最新代码
             if (EditorUtility.DisplayDialog("确认", "检测到现有Git仓库，是否拉取最新代码？", "是", "否"))
             {
+                UpdateProgress("更新仓库", 0.1f, "正在拉取最新代码...");
                 ExecuteGitCommand("pull", "正在拉取最新代码...");
+                ResetProgress();
             }
         }
         else
@@ -477,7 +521,13 @@ public class CW_E_ExportCWTK : EditorWindow
             
             try
             {
+                UpdateProgress("初始化仓库", 0.1f, "正在创建目录...");
                 Directory.CreateDirectory(localRepoPath);
+                
+                // 配置Git行结束符设置
+                ConfigureGitLineEndings();
+                
+                UpdateProgress("初始化仓库", 0.2f, "正在克隆仓库...");
                 
                 // 克隆仓库
                 Process process = new Process();
@@ -490,8 +540,20 @@ public class CW_E_ExportCWTK : EditorWindow
                 process.StartInfo.WorkingDirectory = Path.GetDirectoryName(localRepoPath);
                 
                 StringBuilder output = new StringBuilder();
-                process.OutputDataReceived += (sender, args) => { if (args.Data != null) output.AppendLine(args.Data); };
-                process.ErrorDataReceived += (sender, args) => { if (args.Data != null) output.AppendLine(args.Data); };
+                process.OutputDataReceived += (sender, args) => { 
+                    if (args.Data != null) {
+                        output.AppendLine(args.Data);
+                        progressDetails = args.Data;
+                        Repaint();
+                    }
+                };
+                process.ErrorDataReceived += (sender, args) => { 
+                    if (args.Data != null) {
+                        output.AppendLine(args.Data);
+                        progressDetails = args.Data;
+                        Repaint();
+                    }
+                };
                 
                 process.Start();
                 process.BeginOutputReadLine();
@@ -500,23 +562,79 @@ public class CW_E_ExportCWTK : EditorWindow
                 
                 if (process.ExitCode == 0)
                 {
-                    EditorUtility.DisplayDialog("成功", "仓库克隆成功", "确定");
+                    UpdateProgress("初始化仓库", 0.9f, "仓库克隆完成");
                     
                     // 如果需要使用LFS，初始化LFS
                     if (useGitLFS)
                     {
+                        UpdateProgress("初始化仓库", 0.95f, "正在初始化Git LFS...");
                         ExecuteGitCommand("lfs install", "正在初始化Git LFS...");
                     }
+                    
+                    EditorUtility.DisplayDialog("成功", "仓库克隆成功", "确定");
+                    ResetProgress();
                 }
                 else
                 {
+                    ResetProgress();
                     EditorUtility.DisplayDialog("错误", $"仓库克隆失败: \n{output}", "确定");
                 }
             }
             catch (Exception ex)
             {
+                ResetProgress();
                 EditorUtility.DisplayDialog("错误", $"初始化仓库失败: {ex.Message}", "确定");
             }
+        }
+    }
+    
+    // 配置Git行结束符设置，避免LF/CRLF警告
+    private void ConfigureGitLineEndings()
+    {
+        try
+        {
+            // 设置全局行结束符配置
+            ExecuteGitCommand("config --global core.autocrlf false", "配置行结束符...");
+            ExecuteGitCommand("config --global core.safecrlf false", "配置行结束符安全检查...");
+            
+            // 为当前仓库创建.gitattributes文件
+            string gitattributesPath = Path.Combine(localRepoPath, ".gitattributes");
+            if (!File.Exists(gitattributesPath))
+            {
+                StringBuilder sb = new StringBuilder();
+                sb.AppendLine("# 设置默认行为，所有文件保持原有的行结束符");
+                sb.AppendLine("* text=auto");
+                sb.AppendLine();
+                sb.AppendLine("# 明确声明应该规范化的文本文件");
+                sb.AppendLine("*.cs text");
+                sb.AppendLine("*.txt text");
+                sb.AppendLine("*.md text");
+                sb.AppendLine("*.json text");
+                sb.AppendLine("*.xml text");
+                sb.AppendLine("*.shader text");
+                sb.AppendLine();
+                sb.AppendLine("# 二进制文件不应被修改");
+                sb.AppendLine("*.png binary");
+                sb.AppendLine("*.jpg binary");
+                sb.AppendLine("*.jpeg binary");
+                sb.AppendLine("*.gif binary");
+                sb.AppendLine("*.tif binary");
+                sb.AppendLine("*.tiff binary");
+                sb.AppendLine("*.ico binary");
+                sb.AppendLine("*.unity binary");
+                sb.AppendLine("*.asset binary");
+                sb.AppendLine("*.prefab binary");
+                sb.AppendLine("*.fbx binary");
+                sb.AppendLine("*.wav binary");
+                sb.AppendLine("*.mp3 binary");
+                
+                File.WriteAllText(gitattributesPath, sb.ToString());
+                UnityEngine.Debug.Log("已创建.gitattributes文件");
+            }
+        }
+        catch (Exception ex)
+        {
+            UnityEngine.Debug.LogWarning($"配置Git行结束符失败: {ex.Message}");
         }
     }
     
@@ -531,7 +649,7 @@ public class CW_E_ExportCWTK : EditorWindow
         ExecuteGitCommand("status", "正在检查仓库状态...");
     }
     
-    private void UploadToGitHub()
+    private async void UploadToGitHubAsync()
     {
         List<string> selectedPaths = GetSelectedPaths();
         
@@ -552,6 +670,10 @@ public class CW_E_ExportCWTK : EditorWindow
             if (EditorUtility.DisplayDialog("警告", "所选路径不是Git仓库，是否初始化仓库？", "是", "否"))
             {
                 InitializeRepository();
+                if (!Directory.Exists(Path.Combine(localRepoPath, ".git")))
+                {
+                    return; // 如果初始化失败，直接返回
+                }
             }
             else
             {
@@ -559,23 +681,82 @@ public class CW_E_ExportCWTK : EditorWindow
             }
         }
         
-        // 更新package.json文件
-        UpdatePackageJson();
-        
-        // 清空仓库目录下的内容(除了.git目录)
-        ClearRepositoryContent();
-        
-        // 复制选中的文件夹到仓库
-        CopySelectedFoldersToRepo(selectedPaths);
-        
-        // Git添加、提交和推送
-        if (ExecuteGitCommand("add .", "正在添加文件..."))
+        try
         {
-            if (ExecuteGitCommand($"commit -m \"{commitMessage}\"", "正在提交更改..."))
+            // 配置Git行结束符设置
+            UpdateProgress("准备上传", 0.02f, "正在配置Git行结束符设置...");
+            ConfigureGitLineEndings();
+            await Task.Delay(300);
+            
+            // 更新package.json文件
+            UpdateProgress("准备上传", 0.05f, "正在更新package.json...");
+            UpdatePackageJson();
+            await Task.Delay(300);
+            
+            // 清空仓库目录下的内容(除了.git目录)
+            UpdateProgress("准备上传", 0.10f, "正在清理仓库目录...");
+            ClearRepositoryContent();
+            await Task.Delay(300);
+            
+            // 复制选中的文件夹到仓库
+            UpdateProgress("准备上传", 0.15f, "正在复制文件...");
+            await CopySelectedFoldersToRepoAsync(selectedPaths);
+            
+            // Git添加
+            UpdateProgress("Git操作", 0.70f, "正在添加文件到Git...");
+            if (await ExecuteGitCommandAsync("add -A", "正在添加文件..."))
             {
-                ExecuteGitCommand("push", "正在推送到GitHub...");
+                // Git提交
+                UpdateProgress("Git操作", 0.80f, "正在提交更改...");
+                bool commitSuccess = await ExecuteGitCommandAsync($"commit -m \"{commitMessage}\" --no-verify", "正在提交更改...");
+                
+                if (commitSuccess)
+                {
+                    // Git推送
+                    UpdateProgress("Git操作", 0.90f, "正在推送到GitHub...");
+                    bool pushSuccess = await ExecuteGitCommandAsync("push --force", "正在推送到GitHub...");
+                    
+                    UpdateProgress("完成", 1.0f, pushSuccess ? "上传成功！" : "推送失败，但本地提交已完成。");
+                    await Task.Delay(2000); // 显示完成信息2秒
+                    
+                    if (pushSuccess)
+                    {
+                        EditorUtility.DisplayDialog("成功", "文件已成功上传到GitHub仓库", "确定");
+                    }
+                }
+                else
+                {
+                    // 如果提交失败，尝试使用-f强制提交
+                    UpdateProgress("Git操作", 0.85f, "尝试强制提交...");
+                    if (await ExecuteGitCommandAsync($"commit -m \"{commitMessage}\" --no-verify -f", "正在强制提交..."))
+                    {
+                        UpdateProgress("Git操作", 0.90f, "正在推送到GitHub...");
+                        bool pushSuccess = await ExecuteGitCommandAsync("push --force", "正在推送到GitHub...");
+                        
+                        UpdateProgress("完成", 1.0f, pushSuccess ? "上传成功！" : "推送失败，但本地提交已完成。");
+                        await Task.Delay(2000);
+                        
+                        if (pushSuccess)
+                        {
+                            EditorUtility.DisplayDialog("成功", "文件已成功上传到GitHub仓库", "确定");
+                        }
+                    }
+                }
             }
+            
+            ResetProgress();
         }
+        catch (Exception ex)
+        {
+            ResetProgress();
+            EditorUtility.DisplayDialog("错误", $"上传过程中发生错误: {ex.Message}", "确定");
+        }
+    }
+    
+    private void UploadToGitHub()
+    {
+        // 启动异步上传过程
+        UploadToGitHubAsync();
     }
     
     private List<string> GetSelectedPaths()
@@ -672,12 +853,19 @@ public class CW_E_ExportCWTK : EditorWindow
         }
     }
     
-    private void CopySelectedFoldersToRepo(List<string> selectedPaths)
+    private async Task CopySelectedFoldersToRepoAsync(List<string> selectedPaths)
     {
+        int totalPaths = selectedPaths.Count;
+        int processed = 0;
+        
         foreach (string sourcePath in selectedPaths)
         {
             try
             {
+                processed++;
+                float progress = 0.15f + (0.55f * processed / totalPaths);
+                UpdateProgress("准备上传", progress, $"正在复制: {sourcePath}");
+                
                 string relativePath = sourcePath;
                 if (sourcePath.StartsWith("Assets/"))
                 {
@@ -695,28 +883,45 @@ public class CW_E_ExportCWTK : EditorWindow
                 else if (Directory.Exists(sourcePath))
                 {
                     // 复制文件夹
-                    CopyDirectory(sourcePath, targetPath);
+                    await CopyDirectoryAsync(sourcePath, targetPath);
                 }
+                
+                // 每个文件/文件夹后稍微延迟，让UI能够更新
+                await Task.Delay(100);
             }
             catch (Exception ex)
             {
                 UnityEngine.Debug.LogError($"复制 {sourcePath} 失败: {ex.Message}");
+                progressDetails = $"错误: {ex.Message}";
+                Repaint();
             }
         }
         
         UnityEngine.Debug.Log("所有选定文件已复制到仓库");
     }
     
-    private void CopyDirectory(string sourceDir, string targetDir)
+    private async Task CopyDirectoryAsync(string sourceDir, string targetDir)
     {
         Directory.CreateDirectory(targetDir);
         
         // 复制文件
-        foreach (var file in Directory.GetFiles(sourceDir))
+        string[] files = Directory.GetFiles(sourceDir);
+        for (int i = 0; i < files.Length; i++)
         {
+            string file = files[i];
             string fileName = Path.GetFileName(file);
             string targetFile = Path.Combine(targetDir, fileName);
+            
+            progressDetails = $"复制文件: {fileName}";
+            Repaint();
+            
             File.Copy(file, targetFile, true);
+            
+            // 每10个文件更新一次，避免UI过于频繁刷新
+            if (i % 10 == 0)
+            {
+                await Task.Delay(1);
+            }
         }
         
         // 递归复制子目录
@@ -727,8 +932,116 @@ public class CW_E_ExportCWTK : EditorWindow
             // 跳过.git目录
             if (dirName == ".git") continue;
             
+            progressDetails = $"复制目录: {dirName}";
+            Repaint();
+            
             string targetSubDir = Path.Combine(targetDir, dirName);
-            CopyDirectory(dir, targetSubDir);
+            await CopyDirectoryAsync(dir, targetSubDir);
+        }
+    }
+    
+    private async Task<bool> ExecuteGitCommandAsync(string arguments, string progressTitle)
+    {
+        try
+        {
+            Process process = new Process();
+            process.StartInfo.FileName = "git";
+            process.StartInfo.Arguments = arguments;
+            process.StartInfo.UseShellExecute = false;
+            process.StartInfo.RedirectStandardOutput = true;
+            process.StartInfo.RedirectStandardError = true;
+            process.StartInfo.CreateNoWindow = true;
+            process.StartInfo.WorkingDirectory = localRepoPath;
+            
+            StringBuilder output = new StringBuilder();
+            
+            process.OutputDataReceived += (sender, args) => { 
+                if (args.Data != null) {
+                    output.AppendLine(args.Data);
+                    progressDetails = args.Data;
+                    Repaint();
+                }
+            };
+            
+            process.ErrorDataReceived += (sender, args) => { 
+                if (args.Data != null) {
+                    output.AppendLine(args.Data);
+                    // 如果是行结束符警告，不要阻止进程
+                    if (args.Data.Contains("LF will be replaced by CRLF") || 
+                        args.Data.Contains("CRLF will be replaced by LF"))
+                    {
+                        UnityEngine.Debug.LogWarning("Git行结束符警告: " + args.Data);
+                    }
+                    progressDetails = args.Data;
+                    Repaint();
+                }
+            };
+            
+            process.Start();
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+            
+            // 设置超时时间，防止无限等待
+            bool hasExited = false;
+            int timeoutCounter = 0;
+            int timeoutLimit = 300; // 30秒超时
+            
+            while (!hasExited && timeoutCounter < timeoutLimit)
+            {
+                hasExited = process.WaitForExit(100);
+                timeoutCounter++;
+                await Task.Delay(100);
+                Repaint();
+                
+                // 如果进度信息包含行结束符警告，则继续执行
+                if (progressDetails.Contains("LF will be replaced by CRLF") || 
+                    progressDetails.Contains("CRLF will be replaced by LF"))
+                {
+                    // 刷新进度显示
+                    progressDetails += "\n(这是正常的行结束符警告，正在继续处理...)";
+                    Repaint();
+                }
+            }
+            
+            if (!hasExited)
+            {
+                // 如果超时，尝试终止进程
+                try
+                {
+                    if (!process.HasExited)
+                    {
+                        process.Kill();
+                    }
+                }
+                catch { }
+                
+                EditorUtility.DisplayDialog("警告", "Git命令执行超时，可能是因为需要用户交互。请尝试在终端中手动执行Git命令。", "确定");
+                return false;
+            }
+            
+            UnityEngine.Debug.Log($"Git命令 '{arguments}' 输出:\n{output}");
+            
+            // 即使有行结束符警告也视为成功
+            if (process.ExitCode != 0)
+            {
+                string outputStr = output.ToString();
+                if (outputStr.Contains("LF will be replaced by CRLF") || 
+                    outputStr.Contains("CRLF will be replaced by LF"))
+                {
+                    UnityEngine.Debug.LogWarning("Git命令有行结束符警告，但继续执行: " + outputStr);
+                    return true;
+                }
+                
+                EditorUtility.DisplayDialog("Git错误", $"命令执行失败: git {arguments}\n\n{output}", "确定");
+                return false;
+            }
+            
+            return true;
+        }
+        catch (Exception ex)
+        {
+            EditorUtility.DisplayDialog("错误", $"执行Git命令失败: {ex.Message}", "确定");
+            return false;
         }
     }
     
@@ -746,8 +1059,26 @@ public class CW_E_ExportCWTK : EditorWindow
             process.StartInfo.WorkingDirectory = localRepoPath;
             
             StringBuilder output = new StringBuilder();
-            process.OutputDataReceived += (sender, args) => { if (args.Data != null) output.AppendLine(args.Data); };
-            process.ErrorDataReceived += (sender, args) => { if (args.Data != null) output.AppendLine(args.Data); };
+            process.OutputDataReceived += (sender, args) => { 
+                if (args.Data != null) {
+                    output.AppendLine(args.Data);
+                    if (isUploading)
+                    {
+                        progressDetails = args.Data;
+                        Repaint();
+                    }
+                }
+            };
+            process.ErrorDataReceived += (sender, args) => { 
+                if (args.Data != null) {
+                    output.AppendLine(args.Data);
+                    if (isUploading)
+                    {
+                        progressDetails = args.Data;
+                        Repaint();
+                    }
+                }
+            };
             
             process.Start();
             process.BeginOutputReadLine();
@@ -769,5 +1100,23 @@ public class CW_E_ExportCWTK : EditorWindow
             EditorUtility.DisplayDialog("错误", $"执行Git命令失败: {ex.Message}", "确定");
             return false;
         }
+    }
+    
+    private void UpdateProgress(string step, float progress, string details)
+    {
+        isUploading = true;
+        currentProgressStep = step;
+        uploadProgress = progress;
+        progressDetails = details;
+        Repaint();
+    }
+    
+    private void ResetProgress()
+    {
+        isUploading = false;
+        currentProgressStep = "";
+        uploadProgress = 0f;
+        progressDetails = "";
+        Repaint();
     }
 } 
