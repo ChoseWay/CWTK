@@ -842,8 +842,31 @@ public class CW_E_ExportCWTK : EditorWindow
                 cleanVersion = cleanVersion.Substring(0, bracketIndex).Trim();
             }
             
+            // 确保版本号符合SemVer规范 (x.y.z格式)
+            string[] versionParts = cleanVersion.Split('.');
+            if (versionParts.Length == 1)
+            {
+                // 如果只有一个数字，添加.0.0
+                cleanVersion = cleanVersion + ".0.0";
+            }
+            else if (versionParts.Length == 2)
+            {
+                // 如果只有两段，添加.0作为修订号
+                cleanVersion = cleanVersion + ".0";
+            }
+            
             // 验证版本号格式
-            if (!IsValidVersion(cleanVersion))
+            bool isValidVersion = true;
+            foreach (string part in versionParts)
+            {
+                if (!int.TryParse(part, out _))
+                {
+                    isValidVersion = false;
+                    break;
+                }
+            }
+            
+            if (!isValidVersion)
             {
                 UnityEngine.Debug.LogWarning($"版本号 '{cleanVersion}' 格式不正确，使用默认版本号 '1.0.0'");
                 cleanVersion = "1.0.0";
@@ -852,6 +875,13 @@ public class CW_E_ExportCWTK : EditorWindow
             string displayName = "CWTK Unity工具包";
             string description = "专为Unity开发的工具包，提供多种实用功能";
             string author = "ChoseWay";
+            
+            // 为依赖项定义适当的版本
+            StringBuilder dependencies = new StringBuilder();
+            dependencies.AppendLine("  \"dependencies\": {");
+            dependencies.AppendLine("    \"com.unity.editorcoroutines\": \"1.0.0\","); // 添加编辑器协程依赖
+            dependencies.AppendLine("    \"com.unity.textmeshpro\": \"3.0.6\"");       // 添加TextMeshPro依赖
+            dependencies.AppendLine("  },");
             
             // 创建符合UPM规范的package.json
             StringBuilder sb = new StringBuilder();
@@ -864,7 +894,7 @@ public class CW_E_ExportCWTK : EditorWindow
             sb.AppendLine($"  \"documentationUrl\": \"\",");
             sb.AppendLine($"  \"changelogUrl\": \"\",");
             sb.AppendLine($"  \"licensesUrl\": \"\",");
-            sb.AppendLine($"  \"dependencies\": {{}},");
+            sb.Append(dependencies.ToString());
             sb.AppendLine($"  \"keywords\": [");
             sb.AppendLine($"    \"cwtk\",");
             sb.AppendLine($"    \"unity\",");
@@ -932,6 +962,9 @@ public class CW_E_ExportCWTK : EditorWindow
         int totalPaths = selectedPaths.Count;
         int processed = 0;
         
+        // 首先复制文件夹前，创建asmdef文件以解决引用问题
+        await CreateAssemblyDefinitionsAsync();
+        
         foreach (string sourcePath in selectedPaths)
         {
             try
@@ -954,11 +987,23 @@ public class CW_E_ExportCWTK : EditorWindow
                     // 复制单个文件
                     Directory.CreateDirectory(Path.GetDirectoryName(targetPath));
                     File.Copy(sourcePath, targetPath, true);
+                    
+                    // 复制元数据文件
+                    string metaPath = sourcePath + ".meta";
+                    if (File.Exists(metaPath))
+                    {
+                        File.Copy(metaPath, targetPath + ".meta", true);
+                    }
+                    else
+                    {
+                        // 如果没有元数据文件，创建一个基本的
+                        CreateBasicMetaFile(targetPath);
+                    }
                 }
                 else if (Directory.Exists(sourcePath))
                 {
                     // 复制文件夹
-                    await CopyDirectoryAsync(sourcePath, targetPath);
+                    await CopyDirectoryWithMetasAsync(sourcePath, targetPath);
                 }
                 
                 // 每个文件/文件夹后稍微延迟，让UI能够更新
@@ -976,6 +1021,190 @@ public class CW_E_ExportCWTK : EditorWindow
         await CreateUPMSpecialFilesAsync();
         
         UnityEngine.Debug.Log("所有选定文件已复制到仓库");
+    }
+    
+    // 创建Assembly Definition文件解决引用问题
+    private async Task CreateAssemblyDefinitionsAsync()
+    {
+        try
+        {
+            UpdateProgress("准备上传", 0.14f, "正在创建Assembly Definition文件...");
+            
+            // 为ChoseWay核心创建asmdef
+            string coreAsmdefPath = Path.Combine(localRepoPath, "ChoseWay", "CWTK.asmdef");
+            Directory.CreateDirectory(Path.GetDirectoryName(coreAsmdefPath));
+            
+            StringBuilder coreAsmdef = new StringBuilder();
+            coreAsmdef.AppendLine("{");
+            coreAsmdef.AppendLine("    \"name\": \"CWTK\",");
+            coreAsmdef.AppendLine("    \"rootNamespace\": \"ChoseWay\",");
+            coreAsmdef.AppendLine("    \"references\": [");
+            coreAsmdef.AppendLine("        \"Unity.TextMeshPro\"");
+            coreAsmdef.AppendLine("    ],");
+            coreAsmdef.AppendLine("    \"includePlatforms\": [],");
+            coreAsmdef.AppendLine("    \"excludePlatforms\": [],");
+            coreAsmdef.AppendLine("    \"allowUnsafeCode\": false,");
+            coreAsmdef.AppendLine("    \"overrideReferences\": false,");
+            coreAsmdef.AppendLine("    \"precompiledReferences\": [],");
+            coreAsmdef.AppendLine("    \"autoReferenced\": true,");
+            coreAsmdef.AppendLine("    \"defineConstraints\": [],");
+            coreAsmdef.AppendLine("    \"versionDefines\": [],");
+            coreAsmdef.AppendLine("    \"noEngineReferences\": false");
+            coreAsmdef.AppendLine("}");
+            
+            File.WriteAllText(coreAsmdefPath, coreAsmdef.ToString());
+            CreateBasicMetaFile(coreAsmdefPath);
+            
+            // 为Editor创建asmdef
+            string editorAsmdefPath = Path.Combine(localRepoPath, "ChoseWay", "Editor", "CWTK.Editor.asmdef");
+            Directory.CreateDirectory(Path.GetDirectoryName(editorAsmdefPath));
+            
+            StringBuilder editorAsmdef = new StringBuilder();
+            editorAsmdef.AppendLine("{");
+            editorAsmdef.AppendLine("    \"name\": \"CWTK.Editor\",");
+            editorAsmdef.AppendLine("    \"rootNamespace\": \"ChoseWay.Editor\",");
+            editorAsmdef.AppendLine("    \"references\": [");
+            editorAsmdef.AppendLine("        \"CWTK\",");
+            editorAsmdef.AppendLine("        \"Unity.TextMeshPro\",");
+            editorAsmdef.AppendLine("        \"Unity.EditorCoroutines.Editor\"");
+            editorAsmdef.AppendLine("    ],");
+            editorAsmdef.AppendLine("    \"includePlatforms\": [");
+            editorAsmdef.AppendLine("        \"Editor\"");
+            editorAsmdef.AppendLine("    ],");
+            editorAsmdef.AppendLine("    \"excludePlatforms\": [],");
+            editorAsmdef.AppendLine("    \"allowUnsafeCode\": false,");
+            editorAsmdef.AppendLine("    \"overrideReferences\": false,");
+            editorAsmdef.AppendLine("    \"precompiledReferences\": [],");
+            editorAsmdef.AppendLine("    \"autoReferenced\": true,");
+            editorAsmdef.AppendLine("    \"defineConstraints\": [],");
+            editorAsmdef.AppendLine("    \"versionDefines\": [],");
+            editorAsmdef.AppendLine("    \"noEngineReferences\": false");
+            editorAsmdef.AppendLine("}");
+            
+            File.WriteAllText(editorAsmdefPath, editorAsmdef.ToString());
+            CreateBasicMetaFile(editorAsmdefPath);
+            
+            // 为Plugins创建asmdef
+            string pluginsAsmdefPath = Path.Combine(localRepoPath, "Plugins", "Plugins.asmdef");
+            Directory.CreateDirectory(Path.GetDirectoryName(pluginsAsmdefPath));
+            
+            StringBuilder pluginsAsmdef = new StringBuilder();
+            pluginsAsmdef.AppendLine("{");
+            pluginsAsmdef.AppendLine("    \"name\": \"CWTK.Plugins\",");
+            pluginsAsmdef.AppendLine("    \"rootNamespace\": \"ChoseWay.Plugins\",");
+            pluginsAsmdef.AppendLine("    \"references\": [],");
+            pluginsAsmdef.AppendLine("    \"includePlatforms\": [],");
+            pluginsAsmdef.AppendLine("    \"excludePlatforms\": [],");
+            pluginsAsmdef.AppendLine("    \"allowUnsafeCode\": false,");
+            pluginsAsmdef.AppendLine("    \"overrideReferences\": false,");
+            pluginsAsmdef.AppendLine("    \"precompiledReferences\": [],");
+            pluginsAsmdef.AppendLine("    \"autoReferenced\": true,");
+            pluginsAsmdef.AppendLine("    \"defineConstraints\": [],");
+            pluginsAsmdef.AppendLine("    \"versionDefines\": [],");
+            pluginsAsmdef.AppendLine("    \"noEngineReferences\": false");
+            pluginsAsmdef.AppendLine("}");
+            
+            File.WriteAllText(pluginsAsmdefPath, pluginsAsmdef.ToString());
+            CreateBasicMetaFile(pluginsAsmdefPath);
+            
+            await Task.Delay(100);
+        }
+        catch (Exception ex)
+        {
+            UnityEngine.Debug.LogError($"创建Assembly Definition文件失败: {ex.Message}");
+        }
+    }
+    
+    // 创建基本的meta文件
+    private void CreateBasicMetaFile(string filePath)
+    {
+        try
+        {
+            string metaPath = filePath + ".meta";
+            if (!File.Exists(metaPath))
+            {
+                string guid = Guid.NewGuid().ToString("N");
+                StringBuilder meta = new StringBuilder();
+                meta.AppendLine("fileFormatVersion: 2");
+                meta.AppendLine($"guid: {guid}");
+                meta.AppendLine("DefaultImporter:");
+                meta.AppendLine("  externalObjects: {}");
+                meta.AppendLine("  userData: ");
+                meta.AppendLine("  assetBundleName: ");
+                meta.AppendLine("  assetBundleVariant: ");
+                
+                File.WriteAllText(metaPath, meta.ToString());
+            }
+        }
+        catch (Exception ex)
+        {
+            UnityEngine.Debug.LogError($"创建meta文件失败: {ex.Message}");
+        }
+    }
+    
+    // 复制文件夹及其meta文件
+    private async Task CopyDirectoryWithMetasAsync(string sourceDir, string targetDir)
+    {
+        Directory.CreateDirectory(targetDir);
+        
+        // 复制目录的meta文件
+        string dirMetaPath = sourceDir + ".meta";
+        if (File.Exists(dirMetaPath))
+        {
+            File.Copy(dirMetaPath, targetDir + ".meta", true);
+        }
+        else
+        {
+            CreateBasicMetaFile(targetDir);
+        }
+        
+        // 复制文件
+        string[] files = Directory.GetFiles(sourceDir);
+        for (int i = 0; i < files.Length; i++)
+        {
+            string file = files[i];
+            if (file.EndsWith(".meta")) continue; // 跳过meta文件，单独处理
+            
+            string fileName = Path.GetFileName(file);
+            string targetFile = Path.Combine(targetDir, fileName);
+            
+            progressDetails = $"复制文件: {fileName}";
+            Repaint();
+            
+            File.Copy(file, targetFile, true);
+            
+            // 复制对应的meta文件
+            string metaFile = file + ".meta";
+            if (File.Exists(metaFile))
+            {
+                File.Copy(metaFile, targetFile + ".meta", true);
+            }
+            else
+            {
+                CreateBasicMetaFile(targetFile);
+            }
+            
+            // 每10个文件更新一次，避免UI过于频繁刷新
+            if (i % 10 == 0)
+            {
+                await Task.Delay(1);
+            }
+        }
+        
+        // 递归复制子目录
+        foreach (var dir in Directory.GetDirectories(sourceDir))
+        {
+            string dirName = Path.GetFileName(dir);
+            
+            // 跳过.git目录
+            if (dirName == ".git") continue;
+            
+            progressDetails = $"复制目录: {dirName}";
+            Repaint();
+            
+            string targetSubDir = Path.Combine(targetDir, dirName);
+            await CopyDirectoryWithMetasAsync(dir, targetSubDir);
+        }
     }
     
     private async Task CreateUPMSpecialFilesAsync()
@@ -1016,6 +1245,7 @@ public class CW_E_ExportCWTK : EditorWindow
                 
                 File.WriteAllText(readmePath, readmeSb.ToString());
                 UnityEngine.Debug.Log("创建README.md成功");
+                CreateBasicMetaFile(readmePath);
             }
             
             // 创建CHANGELOG.md文件（如果不存在或有更新）
@@ -1089,46 +1319,6 @@ public class CW_E_ExportCWTK : EditorWindow
         catch (Exception ex)
         {
             UnityEngine.Debug.LogError($"创建UPM特殊文件失败: {ex.Message}");
-        }
-    }
-    
-    private async Task CopyDirectoryAsync(string sourceDir, string targetDir)
-    {
-        Directory.CreateDirectory(targetDir);
-        
-        // 复制文件
-        string[] files = Directory.GetFiles(sourceDir);
-        for (int i = 0; i < files.Length; i++)
-        {
-            string file = files[i];
-            string fileName = Path.GetFileName(file);
-            string targetFile = Path.Combine(targetDir, fileName);
-            
-            progressDetails = $"复制文件: {fileName}";
-            Repaint();
-            
-            File.Copy(file, targetFile, true);
-            
-            // 每10个文件更新一次，避免UI过于频繁刷新
-            if (i % 10 == 0)
-            {
-                await Task.Delay(1);
-            }
-        }
-        
-        // 递归复制子目录
-        foreach (var dir in Directory.GetDirectories(sourceDir))
-        {
-            string dirName = Path.GetFileName(dir);
-            
-            // 跳过.git目录
-            if (dirName == ".git") continue;
-            
-            progressDetails = $"复制目录: {dirName}";
-            Repaint();
-            
-            string targetSubDir = Path.Combine(targetDir, dirName);
-            await CopyDirectoryAsync(dir, targetSubDir);
         }
     }
     

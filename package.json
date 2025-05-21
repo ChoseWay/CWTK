@@ -7,7 +7,10 @@
   "documentationUrl": "",
   "changelogUrl": "",
   "licensesUrl": "",
-  "dependencies": {},
+  "dependencies": {
+    "com.unity.editorcoroutines": "1.0.0",
+    "com.unity.textmeshpro": "3.0.6"
+  },
   "keywords": [
     "cwtk",
     "unity",
